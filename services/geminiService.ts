@@ -7,14 +7,24 @@ const getApiKey = (): string | null => {
   const stored = localStorage.getItem('gemini_api_key');
   if (stored) return stored;
   
-  // 2. Check Environment Variables (Vite or Standard)
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
+  // 2. Check Environment Variables
+  // Using try-catch to safely handle process or import.meta access
+  try {
     // @ts-ignore
-    return import.meta.env.VITE_API_KEY;
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
+      // @ts-ignore
+      return import.meta.env.VITE_API_KEY;
+    }
+  } catch (e) {
+    // Ignore error if import.meta is not available
   }
-  if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
-    return process.env.API_KEY;
+
+  try {
+    if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+      return process.env.API_KEY;
+    }
+  } catch (e) {
+    // Ignore
   }
   
   return null;
@@ -85,10 +95,7 @@ export const analyzePortfolio = async (symbols: string[]): Promise<StockAnalysis
       model: model,
       contents: prompt,
       config: {
-        // Enable Google Search to get real-time data
         tools: [{ googleSearch: {} }],
-        // NOTE: responseSchema/responseMimeType cannot be used with tools in some versions,
-        // so we ask for JSON in the prompt and parse manually.
       }
     });
 
@@ -175,7 +182,6 @@ export const getRetirementAdvice = async (plan: RetirementPlan, result: Retireme
     const response = await ai.models.generateContent({
       model: model,
       contents: prompt,
-      // No tools needed for general advice
     });
     return response.text || "無法產生建議，請稍後再試。";
   } catch (error) {

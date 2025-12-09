@@ -20,6 +20,10 @@ export interface RetirementPlan {
   monthlySavings: number;
   targetMonthlyPension: number;
   expectedAnnualReturn: number;
+  // Insurance specific fields
+  insurancePrincipal: number;
+  insuranceRate: number;
+  insuranceYearDone: number;
 }
 
 export interface RetirementResult {

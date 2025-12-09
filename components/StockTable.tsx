@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { StockAnalysis } from '../types';
-import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, Calculator } from 'lucide-react';
+import { ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, Calculator, Search, Filter, XCircle } from 'lucide-react';
 import AnalysisChart from './AnalysisChart';
 
 interface StockTableProps {
@@ -21,6 +21,8 @@ const StockTable: React.FC<StockTableProps> = ({
   onQuantityChange
 }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState<string>('ALL'); // ALL, BUY, SELL, HOLD
 
   const toggleExpand = (symbol: string) => {
     setExpandedId(expandedId === symbol ? null : symbol);
@@ -37,11 +39,27 @@ const StockTable: React.FC<StockTableProps> = ({
     }
   };
 
-  // Calculate Grand Total if quantities are provided
-  const grandTotal = quantities ? stocks.reduce((sum, stock) => {
-    const qty = quantities[stock.symbol] || 0;
-    return sum + (stock.currentPrice * qty);
-  }, 0) : 0;
+  // Filter Logic
+  const filteredStocks = useMemo(() => {
+    return stocks.filter(stock => {
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch = stock.symbol.toLowerCase().includes(searchLower) || 
+                            stock.name.toLowerCase().includes(searchLower);
+      
+      const matchesFilter = filterType === 'ALL' || stock.recommendation === filterType;
+      
+      return matchesSearch && matchesFilter;
+    });
+  }, [stocks, searchTerm, filterType]);
+
+  // Calculate Grand Total based on FILTERED stocks (so user sees total of what they are looking at)
+  const displayedTotal = useMemo(() => {
+    if (!quantities) return 0;
+    return filteredStocks.reduce((sum, stock) => {
+      const qty = quantities[stock.symbol] || 0;
+      return sum + (stock.currentPrice * qty);
+    }, 0);
+  }, [filteredStocks, quantities]);
 
   if (loading) {
     return (
@@ -67,9 +85,9 @@ const StockTable: React.FC<StockTableProps> = ({
     <div className="space-y-6">
       {title && <h3 className="text-lg font-bold text-slate-800">{title}</h3>}
 
-      {/* Summary Cards */}
-      {showSummary && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Summary Cards - Only show if not actively filtering/searching to reduce clutter */}
+      {showSummary && searchTerm === '' && filterType === 'ALL' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-fadeIn">
           <div className="bg-emerald-50 rounded-xl p-5 border border-emerald-100">
             <h3 className="text-base font-bold text-emerald-800 mb-2 flex items-center">
               <TrendingUp className="w-4 h-4 mr-2" /> 建議入手 / 加碼區
@@ -108,6 +126,48 @@ const StockTable: React.FC<StockTableProps> = ({
         </div>
       )}
 
+      {/* Filter Toolbar */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-grow">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <Search className="h-4 w-4 text-slate-400" />
+          </div>
+          <input
+            type="text"
+            placeholder="搜尋股票代碼或名稱..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="block w-full pl-10 pr-3 py-2 border border-slate-300 rounded-lg leading-5 bg-white placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+          />
+          {searchTerm && (
+            <button 
+              onClick={() => setSearchTerm('')}
+              className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+            >
+              <XCircle className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        
+        <div className="flex items-center space-x-2 min-w-[160px]">
+          <div className="relative w-full">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Filter className="h-4 w-4 text-slate-500" />
+            </div>
+            <select
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
+              className="block w-full pl-10 pr-8 py-2 text-base border border-slate-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-lg"
+            >
+              <option value="ALL">顯示全部狀態</option>
+              <option value="BUY">建議買入 (BUY)</option>
+              <option value="SELL">建議賣出 (SELL)</option>
+              <option value="HOLD">建議續抱 (HOLD)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
       {/* Main Table */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
@@ -132,129 +192,137 @@ const StockTable: React.FC<StockTableProps> = ({
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-slate-200">
-              {stocks.map((stock) => {
-                const qty = quantities ? (quantities[stock.symbol] || 0) : 0;
-                const totalVal = stock.currentPrice * qty;
+              {filteredStocks.length === 0 ? (
+                <tr>
+                  <td colSpan={onQuantityChange ? 10 : 8} className="px-6 py-10 text-center text-slate-500 italic">
+                    沒有符合篩選條件的股票
+                  </td>
+                </tr>
+              ) : (
+                filteredStocks.map((stock) => {
+                  const qty = quantities ? (quantities[stock.symbol] || 0) : 0;
+                  const totalVal = stock.currentPrice * qty;
 
-                return (
-                <React.Fragment key={stock.symbol}>
-                  <tr 
-                    onClick={(e) => {
-                      // Prevent expand when clicking input
-                      if ((e.target as HTMLElement).tagName !== 'INPUT') {
-                        toggleExpand(stock.symbol);
-                      }
-                    }}
-                    className={`hover:bg-slate-50 transition-colors cursor-pointer ${expandedId === stock.symbol ? 'bg-slate-50' : ''}`}
-                  >
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div>
-                          <div className="text-sm font-bold text-slate-900">{stock.symbol}</div>
-                          <div className="text-xs text-slate-500">{stock.name}</div>
+                  return (
+                  <React.Fragment key={stock.symbol}>
+                    <tr 
+                      onClick={(e) => {
+                        // Prevent expand when clicking input
+                        if ((e.target as HTMLElement).tagName !== 'INPUT') {
+                          toggleExpand(stock.symbol);
+                        }
+                      }}
+                      className={`hover:bg-slate-50 transition-colors cursor-pointer ${expandedId === stock.symbol ? 'bg-slate-50' : ''}`}
+                    >
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div>
+                            <div className="text-sm font-bold text-slate-900">{stock.symbol}</div>
+                            <div className="text-xs text-slate-500">{stock.name}</div>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-slate-800 font-mono">
-                      {stock.currentPrice}
-                    </td>
-
-                    {/* Quantity Input */}
-                    {onQuantityChange && (
-                      <td className="px-6 py-4 whitespace-nowrap text-right bg-indigo-50/20">
-                         <input 
-                           type="number" 
-                           min="0"
-                           placeholder="0"
-                           value={qty || ''} 
-                           onChange={(e) => onQuantityChange(stock.symbol, Number(e.target.value))}
-                           onClick={(e) => e.stopPropagation()}
-                           className="w-20 text-right p-1 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 font-mono"
-                         />
                       </td>
-                    )}
-                    {/* Total Value */}
-                    {onQuantityChange && (
-                      <td className="px-6 py-4 whitespace-nowrap text-right font-mono text-sm font-medium text-slate-700 bg-indigo-50/20">
-                         {totalVal > 0 ? totalVal.toLocaleString() : '-'}
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-slate-800 font-mono">
+                        {stock.currentPrice}
                       </td>
-                    )}
 
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-xs text-slate-500 font-mono hidden lg:table-cell">
-                      <span className="text-rose-600">{stock.high52Week}</span> / <span className="text-emerald-600">{stock.low52Week}</span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-emerald-600 font-mono hidden sm:table-cell">
-                      {stock.suggestBuyPrice}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-rose-600 font-mono hidden sm:table-cell">
-                      {stock.suggestSellPrice}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-center">
-                      {getRecommendationBadge(stock.recommendation)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      {expandedId === stock.symbol ? (
-                        <ChevronUp className="w-5 h-5 text-slate-400 inline" />
-                      ) : (
-                        <ChevronDown className="w-5 h-5 text-slate-400 inline" />
+                      {/* Quantity Input */}
+                      {onQuantityChange && (
+                        <td className="px-6 py-4 whitespace-nowrap text-right bg-indigo-50/20">
+                          <input 
+                            type="number" 
+                            min="0"
+                            placeholder="0"
+                            value={qty || ''} 
+                            onChange={(e) => onQuantityChange(stock.symbol, Number(e.target.value))}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-20 text-right p-1 border border-slate-300 rounded text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 font-mono"
+                          />
+                        </td>
                       )}
-                    </td>
-                  </tr>
-                  
-                  {/* Expanded Row */}
-                  {expandedId === stock.symbol && (
-                    <tr>
-                      <td colSpan={onQuantityChange ? 10 : 8} className="px-0 py-0 border-b border-slate-200 bg-slate-50/50">
-                        <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-8 animate-fadeIn">
-                          {/* Left: Chart */}
-                          <div className="lg:col-span-1">
-                            <AnalysisChart data={stock} />
-                          </div>
-                          
-                          {/* Middle: Analysis */}
-                          <div className="lg:col-span-2 space-y-4">
-                             {/* Mobile Only: Show Price Details that are hidden in table */}
-                             <div className="sm:hidden grid grid-cols-2 gap-2 text-sm bg-white p-3 rounded border border-slate-200">
-                                <div className="flex justify-between"><span>買入目標:</span> <span className="font-mono font-bold text-emerald-600">{stock.suggestBuyPrice}</span></div>
-                                <div className="flex justify-between"><span>賣出目標:</span> <span className="font-mono font-bold text-rose-600">{stock.suggestSellPrice}</span></div>
-                                <div className="flex justify-between col-span-2 border-t pt-2 mt-1"><span>52W 高/低:</span> <span className="font-mono">{stock.high52Week} / {stock.low52Week}</span></div>
-                             </div>
+                      {/* Total Value */}
+                      {onQuantityChange && (
+                        <td className="px-6 py-4 whitespace-nowrap text-right font-mono text-sm font-medium text-slate-700 bg-indigo-50/20">
+                          {totalVal > 0 ? totalVal.toLocaleString() : '-'}
+                        </td>
+                      )}
 
-                            <div>
-                              <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide mb-2">專業分析觀點</h4>
-                              <p className="text-slate-700 leading-relaxed text-sm bg-white p-4 rounded-lg border border-slate-200">
-                                {stock.analysis}
-                              </p>
-                            </div>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
-                                <h5 className="text-xs font-bold text-blue-800 uppercase mb-1">長期預期年化收益</h5>
-                                <p className="text-xl font-bold text-blue-700">{stock.projectedAnnualYield}</p>
-                              </div>
-                              <div className="bg-purple-50 p-4 rounded-lg border border-purple-100">
-                                <h5 className="text-xs font-bold text-purple-800 uppercase mb-1">操作範例</h5>
-                                <p className="text-xs text-purple-900 leading-relaxed">
-                                  {stock.exampleScenario}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-xs text-slate-500 font-mono hidden lg:table-cell">
+                        <span className="text-rose-600">{stock.high52Week}</span> / <span className="text-emerald-600">{stock.low52Week}</span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-emerald-600 font-mono hidden sm:table-cell">
+                        {stock.suggestBuyPrice}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-rose-600 font-mono hidden sm:table-cell">
+                        {stock.suggestSellPrice}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        {getRecommendationBadge(stock.recommendation)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        {expandedId === stock.symbol ? (
+                          <ChevronUp className="w-5 h-5 text-slate-400 inline" />
+                        ) : (
+                          <ChevronDown className="w-5 h-5 text-slate-400 inline" />
+                        )}
                       </td>
                     </tr>
-                  )}
-                </React.Fragment>
-              )})}
+                    
+                    {/* Expanded Row */}
+                    {expandedId === stock.symbol && (
+                      <tr>
+                        <td colSpan={onQuantityChange ? 10 : 8} className="px-0 py-0 border-b border-slate-200 bg-slate-50/50">
+                          <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-8 animate-fadeIn">
+                            {/* Left: Chart */}
+                            <div className="lg:col-span-1">
+                              <AnalysisChart data={stock} />
+                            </div>
+                            
+                            {/* Middle: Analysis */}
+                            <div className="lg:col-span-2 space-y-4">
+                              {/* Mobile Only: Show Price Details that are hidden in table */}
+                              <div className="sm:hidden grid grid-cols-2 gap-2 text-sm bg-white p-3 rounded border border-slate-200">
+                                  <div className="flex justify-between"><span>買入目標:</span> <span className="font-mono font-bold text-emerald-600">{stock.suggestBuyPrice}</span></div>
+                                  <div className="flex justify-between"><span>賣出目標:</span> <span className="font-mono font-bold text-rose-600">{stock.suggestSellPrice}</span></div>
+                                  <div className="flex justify-between col-span-2 border-t pt-2 mt-1"><span>52W 高/低:</span> <span className="font-mono">{stock.high52Week} / {stock.low52Week}</span></div>
+                              </div>
+
+                              <div>
+                                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide mb-2">專業分析觀點</h4>
+                                <p className="text-slate-700 leading-relaxed text-sm bg-white p-4 rounded-lg border border-slate-200">
+                                  {stock.analysis}
+                                </p>
+                              </div>
+                              
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                                  <h5 className="text-xs font-bold text-blue-800 uppercase mb-1">長期預期年化收益</h5>
+                                  <p className="text-xl font-bold text-blue-700">{stock.projectedAnnualYield}</p>
+                                </div>
+                                <div className="bg-purple-50 p-4 rounded-lg border border-purple-100">
+                                  <h5 className="text-xs font-bold text-purple-800 uppercase mb-1">操作範例</h5>
+                                  <p className="text-xs text-purple-900 leading-relaxed">
+                                    {stock.exampleScenario}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                )})
+              )}
 
               {/* Grand Total Row */}
-              {onQuantityChange && stocks.length > 0 && (
+              {onQuantityChange && filteredStocks.length > 0 && (
                 <tr className="bg-indigo-50 border-t-2 border-indigo-100">
                   <td colSpan={3} className="px-6 py-4 text-right font-bold text-indigo-900">
-                    投資組合總市值
+                    {filterType !== 'ALL' || searchTerm ? '目前列表總市值' : '投資組合總市值'}
                   </td>
                   <td className="px-6 py-4 text-right font-mono text-lg font-bold text-indigo-700">
-                    ${grandTotal.toLocaleString()}
+                    ${displayedTotal.toLocaleString()}
                   </td>
                   <td colSpan={6} className="hidden lg:table-cell"></td>
                 </tr>

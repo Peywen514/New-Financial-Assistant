@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { RetirementPlan, RetirementResult, StockAnalysis } from '../types';
-import { Calculator, ArrowRight, DollarSign, PiggyBank, Coins, Calculator as CalcIcon } from 'lucide-react';
+import { Calculator, ArrowRight, DollarSign, PiggyBank, Coins, Calculator as CalcIcon, ShieldCheck, Info } from 'lucide-react';
 import { getRetirementAdvice } from '../services/geminiService';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 
@@ -19,13 +19,18 @@ const RetirementCalc: React.FC<RetirementCalcProps> = ({
   const [plan, setPlan] = useState<RetirementPlan>(() => {
     try {
       const saved = localStorage.getItem('finance_retirement_plan');
-      return saved ? JSON.parse(saved) : {
-        currentAge: 30,
-        retirementAge: 65,
-        currentSavings: 1000000,
-        monthlySavings: 20000,
-        targetMonthlyPension: 50000,
-        expectedAnnualReturn: 6
+      const parsed = saved ? JSON.parse(saved) : {};
+      return {
+        currentAge: parsed.currentAge || 30,
+        retirementAge: parsed.retirementAge || 65,
+        currentSavings: parsed.currentSavings || 1000000,
+        monthlySavings: parsed.monthlySavings || 20000,
+        targetMonthlyPension: parsed.targetMonthlyPension || 50000,
+        expectedAnnualReturn: parsed.expectedAnnualReturn || 6,
+        // Default Insurance values (User request: 200k, 2.5%, Year 111/2022)
+        insurancePrincipal: parsed.insurancePrincipal || 200000,
+        insuranceRate: parsed.insuranceRate || 2.5,
+        insuranceYearDone: parsed.insuranceYearDone || 2022
       };
     } catch (e) {
       return {
@@ -34,30 +39,50 @@ const RetirementCalc: React.FC<RetirementCalcProps> = ({
         currentSavings: 1000000,
         monthlySavings: 20000,
         targetMonthlyPension: 50000,
-        expectedAnnualReturn: 6
+        expectedAnnualReturn: 6,
+        insurancePrincipal: 200000,
+        insuranceRate: 2.5,
+        insuranceYearDone: 2022
       };
     }
   });
 
   // Separate Cash Savings to distinguish from Portfolio Value in UI
-  const [cashSavings, setCashSavings] = useState<number>(plan.currentSavings);
+  // Note: plan.currentSavings tracks the TOTAL of Cash + Portfolio (excluding insurance)
+  const [cashSavings, setCashSavings] = useState<number>(0);
   
   const [result, setResult] = useState<RetirementResult | null>(null);
   const [advice, setAdvice] = useState<string>('');
   const [loadingAdvice, setLoadingAdvice] = useState(false);
   const [showPortfolioCalc, setShowPortfolioCalc] = useState(false);
 
-  // Calculate Total Portfolio Value based on passed props
+  // Calculate Total Portfolio Value
   const portfolioTotalValue = portfolioStocks.reduce((sum, stock) => {
     const qty = stockQuantities[stock.symbol] || 0;
     return sum + (stock.currentPrice * qty);
   }, 0);
 
+  // Derived values for UI display
+  const currentYear = new Date().getFullYear();
+  const yearsToRetire = plan.retirementAge - plan.currentAge;
+  const retireYear = currentYear + yearsToRetire;
+  const insuranceCompoundingYears = Math.max(0, retireYear - plan.insuranceYearDone);
+  const insuranceFinalValue = Math.round(plan.insurancePrincipal * Math.pow(1 + (plan.insuranceRate / 100), insuranceCompoundingYears));
+
+  // On mount, split plan.currentSavings into cash (estimate) and portfolio
+  useEffect(() => {
+    // If we have a saved total, subtract portfolio to find cash
+    // This is a simple approximation to keep UI in sync
+    const calculatedCash = Math.max(0, plan.currentSavings - portfolioTotalValue);
+    setCashSavings(calculatedCash);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount
+
   // Sync Plan when cash or portfolio changes
   useEffect(() => {
-    const totalAssets = cashSavings + portfolioTotalValue;
-    if (plan.currentSavings !== totalAssets) {
-      setPlan(prev => ({ ...prev, currentSavings: totalAssets }));
+    const totalInvestableAssets = cashSavings + portfolioTotalValue;
+    if (plan.currentSavings !== totalInvestableAssets) {
+      setPlan(prev => ({ ...prev, currentSavings: totalInvestableAssets }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cashSavings, portfolioTotalValue]);
@@ -70,15 +95,19 @@ const RetirementCalc: React.FC<RetirementCalcProps> = ({
   }, [plan]);
 
   const calculate = () => {
-    const years = plan.retirementAge - plan.currentAge;
-    if (years <= 0) return;
+    if (yearsToRetire <= 0) return;
 
+    // 1. Calculate General Investments (Cash + Stocks) using Expected Return
     const monthlyRate = plan.expectedAnnualReturn / 100 / 12;
-    const months = years * 12;
-
+    const months = yearsToRetire * 12;
     const fvLumpSum = plan.currentSavings * Math.pow(1 + monthlyRate, months);
     const fvMonthly = plan.monthlySavings * ((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate);
-    const totalAccumulated = fvLumpSum + fvMonthly;
+
+    // 2. Calculate Insurance (Fixed Rate)
+    // Formula: Principal * (1 + rate)^(RetireYear - YearDone)
+    const fvInsurance = plan.insurancePrincipal * Math.pow(1 + (plan.insuranceRate / 100), insuranceCompoundingYears);
+
+    const totalAccumulated = fvLumpSum + fvMonthly + fvInsurance;
 
     const safeAnnualWithdrawal = totalAccumulated * 0.04;
     const monthlyPensionPossible = safeAnnualWithdrawal / 12;
@@ -87,7 +116,7 @@ const RetirementCalc: React.FC<RetirementCalcProps> = ({
     const shortfall = Math.max(0, requiredTotal - totalAccumulated);
 
     const calcResult: RetirementResult = {
-      yearsToRetire: years,
+      yearsToRetire: yearsToRetire,
       totalAccumulated,
       monthlyPensionPossible,
       isGoalReachable: monthlyPensionPossible >= plan.targetMonthlyPension,
@@ -114,13 +143,18 @@ const RetirementCalc: React.FC<RetirementCalcProps> = ({
     setCashSavings(Number(value));
   };
 
+  // Chart Data Preparation
   const chartData = result ? [
-    { name: '目前資產複利', value: Math.round(plan.currentSavings * Math.pow(1 + (plan.expectedAnnualReturn / 100 / 12), (plan.retirementAge - plan.currentAge) * 12)) },
+    { name: '目前投資複利', value: Math.round(plan.currentSavings * Math.pow(1 + (plan.expectedAnnualReturn / 100 / 12), (plan.retirementAge - plan.currentAge) * 12)) },
+    { name: '儲蓄險複利', value: insuranceFinalValue },
     { name: '未來投入本金', value: plan.monthlySavings * 12 * (plan.retirementAge - plan.currentAge) },
-    { name: '未來投入複利', value: Math.round(result.totalAccumulated - (plan.currentSavings * Math.pow(1 + (plan.expectedAnnualReturn / 100 / 12), (plan.retirementAge - plan.currentAge) * 12)) - (plan.monthlySavings * 12 * (plan.retirementAge - plan.currentAge))) },
+    { name: '未來投入複利', value: Math.round(result.totalAccumulated - 
+      (plan.currentSavings * Math.pow(1 + (plan.expectedAnnualReturn / 100 / 12), (plan.retirementAge - plan.currentAge) * 12)) - 
+      insuranceFinalValue -
+      (plan.monthlySavings * 12 * (plan.retirementAge - plan.currentAge))) },
   ] : [];
 
-  const COLORS = ['#94a3b8', '#3b82f6', '#10b981'];
+  const COLORS = ['#94a3b8', '#f59e0b', '#3b82f6', '#10b981'];
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -151,11 +185,11 @@ const RetirementCalc: React.FC<RetirementCalcProps> = ({
           </div>
         </div>
 
-        {/* Assets Section */}
+        {/* Investment Assets Section */}
         <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-4">
-          <div className="flex items-center justify-between">
-             <label className="text-sm font-bold text-slate-700">資產總覽 (Total Assets)</label>
-             <span className="text-indigo-600 font-bold font-mono">
+          <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+             <label className="text-sm font-bold text-slate-700">積極投資部位</label>
+             <span className="text-indigo-600 font-bold font-mono text-sm">
                ${plan.currentSavings.toLocaleString()}
              </span>
           </div>
@@ -175,7 +209,7 @@ const RetirementCalc: React.FC<RetirementCalcProps> = ({
             </div>
           </div>
 
-          <div className="border-t border-slate-200 pt-2">
+          <div className="pt-2">
              <div 
                className="flex items-center justify-between cursor-pointer hover:bg-slate-100 p-1 rounded transition-colors"
                onClick={() => setShowPortfolioCalc(!showPortfolioCalc)}
@@ -228,10 +262,84 @@ const RetirementCalc: React.FC<RetirementCalcProps> = ({
                </div>
              )}
           </div>
+          
+           <div>
+             <label className="block text-xs font-medium text-slate-500 mb-1">預期年化報酬率 (%)</label>
+             <input 
+                type="number" 
+                value={plan.expectedAnnualReturn} 
+                onChange={(e) => handleInputChange('expectedAnnualReturn', e.target.value)}
+                className="w-full rounded-md border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 border p-2 text-right text-sm"
+              />
+          </div>
+        </div>
+
+        {/* Insurance Assets Section */}
+        <div className="bg-amber-50 p-4 rounded-lg border border-amber-200 space-y-3">
+          <div className="flex items-center justify-between border-b border-amber-200/60 pb-2">
+             <label className="text-sm font-bold text-amber-800 flex items-center">
+               <ShieldCheck className="w-4 h-4 mr-1" /> 已繳清儲蓄險
+             </label>
+             <span className="text-amber-700 font-mono text-sm font-bold">
+               ${insuranceFinalValue.toLocaleString()}
+             </span>
+          </div>
+          
+          <div>
+            <label className="block text-xs font-medium text-amber-700 mb-1">期滿繳清本金 (元)</label>
+            <input 
+              type="number" 
+              value={plan.insurancePrincipal} 
+              onChange={(e) => handleInputChange('insurancePrincipal', e.target.value)}
+              className="w-full rounded-md border-amber-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 border p-2 text-right text-sm bg-white"
+            />
+          </div>
+          
+          <div className="grid grid-cols-2 gap-3">
+             <div>
+                <label className="block text-xs font-medium text-amber-700 mb-1">複利利率 (%)</label>
+                <input 
+                  type="number" 
+                  step="0.1"
+                  value={plan.insuranceRate} 
+                  onChange={(e) => handleInputChange('insuranceRate', e.target.value)}
+                  className="w-full rounded-md border-amber-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 border p-2 text-right text-sm bg-white"
+                />
+             </div>
+             <div>
+                <label className="block text-xs font-medium text-amber-700 mb-1">繳清年份 (西元)</label>
+                <input 
+                  type="number" 
+                  value={plan.insuranceYearDone} 
+                  onChange={(e) => handleInputChange('insuranceYearDone', e.target.value)}
+                  className="w-full rounded-md border-amber-300 shadow-sm focus:border-amber-500 focus:ring-amber-500 border p-2 text-right text-sm bg-white"
+                />
+                <div className="text-[10px] text-amber-600 text-right mt-0.5">民國 {plan.insuranceYearDone - 1911} 年</div>
+             </div>
+          </div>
+          
+          {/* Calculation Info Box */}
+          <div className="bg-white/60 p-2 rounded border border-amber-200 text-xs text-amber-800/80">
+            <div className="flex items-start gap-1">
+              <Info className="w-3 h-3 mt-0.5 flex-shrink-0" />
+              <div className="leading-relaxed">
+                <span className="font-semibold">複利試算公式：</span>
+                <br/>本金 × (1 + 利率)<sup className="text-[10px]">年數</sup>
+                <br/>
+                <span className="font-mono text-amber-600">
+                  {plan.insurancePrincipal.toLocaleString()} × (1.0{plan.insuranceRate.toString().replace('.','')})
+                  <sup className="text-[10px]">{insuranceCompoundingYears}年</sup>
+                </span>
+                <div className="mt-1 pt-1 border-t border-amber-200/50">
+                   複利年數: {plan.insuranceYearDone}年 ➔ {retireYear}年 (共{insuranceCompoundingYears}年)
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">每月預計投入 (元)</label>
+          <label className="block text-sm font-medium text-slate-700 mb-1">每月預計持續投入 (元)</label>
           <div className="relative rounded-md shadow-sm">
             <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
               <PiggyBank className="h-4 w-4 text-slate-400" />
@@ -260,17 +368,6 @@ const RetirementCalc: React.FC<RetirementCalcProps> = ({
           </div>
         </div>
 
-        <div>
-           <label className="block text-sm font-medium text-slate-700 mb-1">預期年化報酬率 (%)</label>
-           <input 
-              type="number" 
-              value={plan.expectedAnnualReturn} 
-              onChange={(e) => handleInputChange('expectedAnnualReturn', e.target.value)}
-              className="w-full rounded-md border-slate-300 focus:border-indigo-500 focus:ring-indigo-500 border p-2 text-right"
-            />
-            <p className="text-xs text-slate-500 mt-1">建議設定 5% - 8% 較為保守合理</p>
-        </div>
-
         <button
           onClick={fetchAdvice}
           disabled={loadingAdvice || !result}
@@ -293,7 +390,7 @@ const RetirementCalc: React.FC<RetirementCalcProps> = ({
                   {result.isGoalReachable ? '目標可達成' : '目標有差距'}
                 </div>
                 <p className="text-slate-600 mt-1 text-sm">
-                   65歲時每月可領約 NT$ <span className="font-mono font-bold text-lg">{result.monthlyPensionPossible.toLocaleString()}</span>
+                   {plan.retirementAge}歲時每月可領約 NT$ <span className="font-mono font-bold text-lg">{result.monthlyPensionPossible.toLocaleString()}</span>
                 </p>
                 {!result.isGoalReachable && (
                    <p className="text-orange-600 text-xs mt-2 font-medium">
@@ -307,8 +404,9 @@ const RetirementCalc: React.FC<RetirementCalcProps> = ({
                  <div className="text-2xl font-bold text-slate-800 font-mono">
                    NT$ {result.totalAccumulated.toLocaleString(undefined, { maximumFractionDigits: 0 })}
                  </div>
-                 <div className="text-xs text-slate-400 mt-2">
-                   基於 {plan.expectedAnnualReturn}% 年化報酬率複利計算
+                 <div className="text-xs text-slate-400 mt-2 flex flex-wrap gap-2">
+                   <span className="bg-indigo-50 px-2 py-0.5 rounded text-indigo-700">投資 {plan.expectedAnnualReturn}%</span>
+                   <span className="bg-amber-50 px-2 py-0.5 rounded text-amber-700">儲蓄險 {plan.insuranceRate}%</span>
                  </div>
               </div>
             </div>

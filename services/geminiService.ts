@@ -65,18 +65,19 @@ export const analyzePortfolio = async (symbols: string[]): Promise<StockAnalysis
   try {
     const ai = getAIClient();
     const prompt = `
-      你是一個專業的金融分析系統。請使用 Google Search 查詢以下股票的「最新即時股價」或「今日收盤價」：${symbols.join(", ")}。
+      你是一個專業的金融分析系統。請使用 Google Search 查詢以下股票的「正確繁體中文公司名稱」與「最新即時股價」：${symbols.join(", ")}。
       
       **重要指令：**
-      1. 務必使用 Google Search 獲取真實數據，不要使用估算值。
-      2. 「currentPrice」必須是查詢到的最新價格。
-      3. 請針對持有狀況給出建議 (BUY/SELL/HOLD)。
+      1. 務必確認台灣股票名稱正確 (例如: 4564 是 元翎，2330 是 台積電)。
+      2. 務必使用 Google Search 獲取真實數據，不要使用估算值。
+      3. 「currentPrice」必須是查詢到的最新價格。
+      4. 請針對持有狀況給出建議 (BUY/SELL/HOLD)。
       
       請回傳一個純 JSON 陣列 (Array)，不要包含其他解釋文字，格式如下：
       [
         {
           "symbol": "股票代碼 (e.g. 0050)",
-          "name": "股票名稱",
+          "name": "股票名稱 (繁體中文)",
           "marketCap": "市值 (e.g. 3000億)",
           "high52Week": 數字 (52週最高),
           "low52Week": 數字 (52週最低),
@@ -113,12 +114,13 @@ export const analyzeMarketTrends = async (): Promise<StockAnalysis[]> => {
   try {
     const ai = getAIClient();
     const prompt = `
-      請使用 Google Search 掃描「今日」或「近3天」台灣股市 (TWSE) 的熱門新聞、成交量排行或法人買賣超資訊。
+      請使用 Google Search 掃描「今日」或「近3天」台灣股市 (TWSE/TPEX) 的熱門新聞、成交量排行或法人買賣超資訊。
       找出 3 檔目前討論度最高或趨勢最明顯的股票。
       
       **重要指令：**
       1. 使用搜尋工具確保價格 (currentPrice) 是最新的收盤價。
       2. analysis 欄位需說明是因為哪則新聞或事件而熱門。
+      3. 確保公司名稱準確 (例如: 4564 為 元翎)。
       
       請回傳一個純 JSON 陣列 (Array)，不要包含其他解釋文字，格式如下：
       [

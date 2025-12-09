@@ -3,7 +3,7 @@ import { TabView, StockAnalysis } from './types';
 import StockTable from './components/StockTable';
 import RetirementCalc from './components/RetirementCalc';
 import { analyzePortfolio, analyzeMarketTrends } from './services/geminiService';
-import { LineChart, Briefcase, Plus, X, Search, Zap, KeyRound, AlertTriangle } from 'lucide-react';
+import { LineChart, Briefcase, Plus, X, Search, Zap, KeyRound, AlertTriangle, PieChart as PieIcon, TrendingUp } from 'lucide-react';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabView>(TabView.MARKET_ANALYSIS);
@@ -266,16 +266,18 @@ const App: React.FC = () => {
         {activeTab === TabView.MARKET_ANALYSIS && (
           <div className="space-y-10 animate-fadeIn">
             
-            {/* Section 1: My Portfolio */}
+            {/* Section 1: My Portfolio (Existing) */}
             <section className="space-y-4">
               <div className="flex items-center space-x-2 mb-2">
-                 <Briefcase className="w-6 h-6 text-indigo-600" />
-                 <h2 className="text-xl font-bold text-slate-800">我的持股健診</h2>
+                 <div className="p-2 bg-indigo-100 rounded-lg">
+                    <PieIcon className="w-5 h-5 text-indigo-600" />
+                 </div>
+                 <h2 className="text-xl font-bold text-slate-800">現有持股 / 自選分析 (My Portfolio)</h2>
               </div>
               
-              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm transition-shadow hover:shadow-md">
                 <div className="mb-6">
-                   <label className="block text-sm font-medium text-slate-700 mb-2">輸入您持有的股票代碼 (Enter加入)</label>
+                   <label className="block text-sm font-medium text-slate-700 mb-2">輸入目前持有的股票代碼 (Enter加入)</label>
                    <div className="flex gap-2">
                       <div className="relative flex-grow">
                         <input
@@ -283,7 +285,7 @@ const App: React.FC = () => {
                           value={inputSymbol}
                           onChange={(e) => setInputSymbol(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && handleAddSymbol()}
-                          placeholder="例如: 2330, NVDA, TSLA"
+                          placeholder="例如: 2330, 0050, NVDA"
                           className="shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-slate-300 rounded-md p-3 border"
                         />
                         <button 
@@ -298,7 +300,7 @@ const App: React.FC = () => {
                         disabled={mySymbols.length === 0 || portfolioLoading}
                         className="inline-flex items-center px-6 py-3 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                       >
-                        {portfolioLoading ? '分析中' : '分析'}
+                        {portfolioLoading ? '分析中...' : '開始分析'}
                         <Search className="ml-2 w-4 h-4 hidden sm:inline" />
                       </button>
                    </div>
@@ -306,10 +308,10 @@ const App: React.FC = () => {
                    {/* Symbol Tags */}
                    <div className="mt-4 flex flex-wrap gap-2 min-h-[2rem]">
                       {mySymbols.length === 0 && (
-                        <span className="text-sm text-slate-400 italic">您的清單是空的，請新增股票以自動儲存...</span>
+                        <span className="text-sm text-slate-400 italic">您的觀察清單是空的，請新增股票以開始分析...</span>
                       )}
                       {mySymbols.map(symbol => (
-                        <span key={symbol} className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-indigo-50 text-indigo-700 border border-indigo-100">
+                        <span key={symbol} className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 animate-fadeIn">
                           {symbol}
                           <button onClick={() => handleRemoveSymbol(symbol)} className="ml-1.5 text-indigo-400 hover:text-indigo-600">
                             <X className="w-3 h-3" />
@@ -323,6 +325,7 @@ const App: React.FC = () => {
                 {portfolioStocks.length > 0 && (
                   <div className="mt-8 pt-8 border-t border-slate-100 animate-fadeIn">
                      <StockTable 
+                       title="持股診斷報告"
                        stocks={portfolioStocks} 
                        loading={portfolioLoading} 
                        showSummary={true}
@@ -334,26 +337,28 @@ const App: React.FC = () => {
               </div>
             </section>
 
-            {/* Section 2: Market Trends */}
+            {/* Section 2: Market Trends (Market-Type) */}
             <section className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-center space-x-2">
-                   <div className="p-2 bg-orange-100 rounded-lg">
-                      <Zap className="w-5 h-5 text-orange-600" />
+                   <div className="p-2 bg-amber-100 rounded-lg">
+                      <TrendingUp className="w-5 h-5 text-amber-600" />
                    </div>
-                   <h2 className="text-xl font-bold text-slate-800">近三日台股市場熱門與話題股</h2>
+                   <h2 className="text-xl font-bold text-slate-800">市場趨勢選股 (Market Trends)</h2>
                 </div>
                 <button 
                    onClick={handleFetchTrends}
                    disabled={trendLoading}
-                   className="text-sm text-indigo-600 hover:text-indigo-800 font-medium self-end sm:self-auto"
+                   className="flex items-center px-4 py-2 text-sm font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg border border-amber-200 transition-colors"
                 >
-                   {trendLoading ? '掃描中...' : '重新掃描台股熱點'}
+                   <Zap className="w-4 h-4 mr-2" />
+                   {trendLoading ? 'AI 掃描中...' : '重新掃描熱點'}
                 </button>
               </div>
 
               <div className="bg-slate-50 p-1 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                  <StockTable 
+                    title="今日熱門話題股"
                     stocks={trendStocks} 
                     loading={trendLoading} 
                     showSummary={true} 

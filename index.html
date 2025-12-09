@@ -5,7 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>理財小教室 - 專業分析</title>
     
-    <!-- PWA / Mobile Optimized Meta Tags -->
+    <!-- PWA Configuration -->
+    <link rel="manifest" href="/manifest.json">
+    
+    <!-- App Icon (Using a CDN placeholder for immediate result) -->
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/2910/2910312.png" />
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2910/2910312.png">
+    
+    <!-- Mobile Optimized Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="理財小教室">
@@ -20,6 +27,9 @@
         /* Mobile safe area support */
         padding-top: env(safe-area-inset-top);
         padding-bottom: env(safe-area-inset-bottom);
+        background-color: #f8fafc;
+        /* Prevent pull-to-refresh on mobile to feel more like an app */
+        overscroll-behavior-y: none;
       }
       @keyframes fadeIn {
         from { opacity: 0; transform: translateY(-10px); }

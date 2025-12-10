@@ -58,20 +58,49 @@ const extractJson = (text: string): any => {
   }
 };
 
+// Specific corrections for Taiwan stocks based on user feedback and common errors
+const PRE_DEFINED_MAPPINGS: Record<string, string> = {
+  "2834": "2834 臺企銀", // Often confused with TCC
+  "304": "3042 晶技",   // User typo correction
+  "3042": "3042 晶技",
+  "4564": "4564 元翎",
+  "6890": "6890 來億-KY",
+  "1101": "1101 台泥",
+  "9904": "9904 寶成"
+};
+
 export const analyzePortfolio = async (symbols: string[]): Promise<StockAnalysis[]> => {
   const model = "gemini-2.5-flash";
   if (!symbols || symbols.length === 0) return [];
 
+  // Pre-process symbols to fix known issues before sending to AI
+  const querySymbols = symbols.map(s => {
+    const cleanS = s.trim();
+    // Check strict mapping first
+    if (PRE_DEFINED_MAPPINGS[cleanS]) {
+      return PRE_DEFINED_MAPPINGS[cleanS];
+    }
+    // Partial matches or fallbacks
+    if (cleanS.includes('4564')) return '4564 元翎';
+    return cleanS;
+  }).join(", ");
+
   try {
     const ai = getAIClient();
     const prompt = `
-      你是一個專業的金融分析系統。請使用 Google Search 查詢以下股票的「正確繁體中文公司名稱」與「最新即時股價」：${symbols.join(", ")}。
+      你是一個專業的金融分析系統。請使用 Google Search 查詢以下股票的「正確繁體中文公司名稱」與「最新即時股價」：${querySymbols}。
       
-      **重要指令：**
-      1. 務必確認台灣股票名稱正確 (例如: 4564 是 元翎，2330 是 台積電)。
-      2. 務必使用 Google Search 獲取真實數據，不要使用估算值。
-      3. 「currentPrice」必須是查詢到的最新價格。
-      4. 請針對持有狀況給出建議 (BUY/SELL/HOLD)。
+      **極重要 - 代碼校正指令：**
+      請嚴格遵守以下代碼對應，不可混淆：
+      1. **2834 是「臺企銀」(Taiwan Business Bank)**，絕對不是台泥。
+      2. **3042 是「晶技」(TXC)**。
+      3. **6890 是「來億-KY」**。
+      4. 如果輸入是 "304"，請視為 "3042 晶技"。
+      
+      **一般指令：**
+      1. 務必使用 Google Search 獲取真實數據，不要使用估算值。
+      2. 「currentPrice」必須是查詢到的最新價格。
+      3. 請針對持有狀況給出建議 (BUY/SELL/HOLD)。
       
       請回傳一個純 JSON 陣列 (Array)，不要包含其他解釋文字，格式如下：
       [
@@ -120,7 +149,7 @@ export const analyzeMarketTrends = async (): Promise<StockAnalysis[]> => {
       **重要指令：**
       1. 使用搜尋工具確保價格 (currentPrice) 是最新的收盤價。
       2. analysis 欄位需說明是因為哪則新聞或事件而熱門。
-      3. 確保公司名稱準確 (例如: 4564 為 元翎)。
+      3. 確保公司名稱準確 (例如: 2834 是 臺企銀)。
       
       請回傳一個純 JSON 陣列 (Array)，不要包含其他解釋文字，格式如下：
       [

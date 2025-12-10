@@ -3,7 +3,7 @@ import { TabView, StockAnalysis } from './types';
 import StockTable from './components/StockTable';
 import RetirementCalc from './components/RetirementCalc';
 import { analyzePortfolio, analyzeMarketTrends } from './services/geminiService';
-import { LineChart, Briefcase, Plus, X, Search, Zap, KeyRound, AlertTriangle, PieChart as PieIcon, TrendingUp } from 'lucide-react';
+import { LineChart, Briefcase, Plus, X, Search, Zap, KeyRound, AlertTriangle, PieChart as PieIcon, TrendingUp, RefreshCw, Save, CheckCircle } from 'lucide-react';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabView>(TabView.MARKET_ANALYSIS);
@@ -12,12 +12,9 @@ const App: React.FC = () => {
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
   
-  // State for My Portfolio
-  const [portfolioStocks, setPortfolioStocks] = useState<StockAnalysis[]>([]);
-  const [portfolioLoading, setPortfolioLoading] = useState(false);
-  const [inputSymbol, setInputSymbol] = useState('');
-  
-  // Stock Quantities State (Lifted up from RetirementCalc)
+  // --- STATE INITIALIZATION WITH ROBUST RECOVERY ---
+
+  // 1. Stock Quantities (庫存股數)
   const [stockQuantities, setStockQuantities] = useState<Record<string, number>>(() => {
     try {
       const saved = localStorage.getItem('finance_stock_quantities');
@@ -27,15 +24,45 @@ const App: React.FC = () => {
     }
   });
 
+  // 2. My Symbols (股票代碼清單)
   const [mySymbols, setMySymbols] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem('finance_portfolio_symbols');
-      return saved ? JSON.parse(saved) : [];
+      let symbols: string[] = saved ? JSON.parse(saved) : [];
+      
+      // Recovery Mechanism: If symbols list is empty but we have quantities, restore symbols from quantities
+      if (symbols.length === 0) {
+        const savedQty = localStorage.getItem('finance_stock_quantities');
+        if (savedQty) {
+          const qtyMap = JSON.parse(savedQty);
+          const recoveredSymbols = Object.keys(qtyMap);
+          if (recoveredSymbols.length > 0) {
+            symbols = recoveredSymbols;
+            // Sync back to storage immediately
+            localStorage.setItem('finance_portfolio_symbols', JSON.stringify(symbols));
+          }
+        }
+      }
+      return symbols;
     } catch (e) {
       return [];
     }
   });
 
+  // 3. Analysis Data (分析結果)
+  const [portfolioStocks, setPortfolioStocks] = useState<StockAnalysis[]>(() => {
+    try {
+      const saved = localStorage.getItem('finance_portfolio_data');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
+  const [inputSymbol, setInputSymbol] = useState('');
+  const [showSaveToast, setShowSaveToast] = useState(false);
+  
   // State for Market Trends
   const [trendStocks, setTrendStocks] = useState<StockAnalysis[]>([]);
   const [trendLoading, setTrendLoading] = useState(false);
@@ -50,20 +77,40 @@ const App: React.FC = () => {
     if (!storedKey && !hasEnvKey) {
       setShowApiKeyModal(true);
     } else {
+      // Only fetch trends if we have a key
       handleFetchTrends();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist symbols
+  // --- PERSISTENCE EFFECT HANDLERS (Backup) ---
+  // Although we save immediately in handlers, these ensure sync on any other state changes
   useEffect(() => {
     localStorage.setItem('finance_portfolio_symbols', JSON.stringify(mySymbols));
   }, [mySymbols]);
 
-  // Persist quantities
   useEffect(() => {
     localStorage.setItem('finance_stock_quantities', JSON.stringify(stockQuantities));
   }, [stockQuantities]);
+
+  useEffect(() => {
+    localStorage.setItem('finance_portfolio_data', JSON.stringify(portfolioStocks));
+  }, [portfolioStocks]);
+
+  // --- HANDLERS ---
+
+  const handleManualSave = () => {
+    try {
+      localStorage.setItem('finance_portfolio_symbols', JSON.stringify(mySymbols));
+      localStorage.setItem('finance_stock_quantities', JSON.stringify(stockQuantities));
+      localStorage.setItem('finance_portfolio_data', JSON.stringify(portfolioStocks));
+      setShowSaveToast(true);
+      setTimeout(() => setShowSaveToast(false), 2000);
+    } catch (e) {
+      console.error("Save failed", e);
+      alert("儲存失敗，請檢查瀏覽器設定");
+    }
+  };
 
   const handleSaveApiKey = () => {
     if (apiKeyInput.trim()) {
@@ -89,27 +136,46 @@ const App: React.FC = () => {
 
   const handleAddSymbol = () => {
     if (inputSymbol) {
-      const newSymbols = inputSymbol.split(/[, ]+/).map(s => s.trim().toUpperCase()).filter(s => s.length > 0);
+      const newSymbols = inputSymbol.split(/[, ]+/).map(s => {
+        const cleanS = s.trim().toUpperCase();
+        // Client-side quick fix for "304" input
+        if (cleanS === '304') return '3042'; 
+        return cleanS;
+      }).filter(s => s.length > 0);
+      
       const uniqueNewSymbols = newSymbols.filter(s => !mySymbols.includes(s));
       
       if (uniqueNewSymbols.length > 0) {
-        setMySymbols(prev => [...prev, ...uniqueNewSymbols]);
+        const updatedList = [...mySymbols, ...uniqueNewSymbols];
+        setMySymbols(updatedList);
+        // Immediate Save
+        localStorage.setItem('finance_portfolio_symbols', JSON.stringify(updatedList));
         setInputSymbol('');
       }
     }
   };
 
   const handleRemoveSymbol = (symbolToRemove: string) => {
-    setMySymbols(mySymbols.filter(s => s !== symbolToRemove));
-    // Optional: remove quantity data for removed symbol? 
-    // keeping it might be better UX in case of accidental delete
+    const updatedList = mySymbols.filter(s => s !== symbolToRemove);
+    setMySymbols(updatedList);
+    // Immediate Save
+    localStorage.setItem('finance_portfolio_symbols', JSON.stringify(updatedList));
+    
+    // Also remove from current display data so it disappears immediately
+    setPortfolioStocks(prev => {
+      const updated = prev.filter(s => s.symbol !== symbolToRemove);
+      localStorage.setItem('finance_portfolio_data', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const handleQuantityChange = (symbol: string, qty: number) => {
-    setStockQuantities(prev => ({
-      ...prev,
-      [symbol]: qty
-    }));
+    setStockQuantities(prev => {
+      const updated = { ...prev, [symbol]: qty };
+      // Immediate Save
+      localStorage.setItem('finance_stock_quantities', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   const handleAnalyzePortfolio = async () => {
@@ -119,6 +185,8 @@ const App: React.FC = () => {
     try {
       const data = await analyzePortfolio(mySymbols);
       setPortfolioStocks(data);
+      // Immediate Save
+      localStorage.setItem('finance_portfolio_data', JSON.stringify(data));
     } catch (err) {
       console.error(err);
       setErrorMsg("分析失敗。請確認您的 API 金鑰是否正確。");
@@ -134,8 +202,26 @@ const App: React.FC = () => {
     }
   };
 
+  // Helper to check if we have symbols but missing analysis data
+  const hasPendingSymbols = useMemo(() => {
+    if (mySymbols.length === 0) return false;
+    // If portfolioStocks is empty, obviously pending
+    if (portfolioStocks.length === 0) return true;
+    // Or if symbols count mismatch significantly (user added new ones)
+    const analyzedSymbols = portfolioStocks.map(s => s.symbol);
+    return mySymbols.some(s => !analyzedSymbols.includes(s));
+  }, [mySymbols, portfolioStocks]);
+
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-20">
+      {/* Toast Notification */}
+      {showSaveToast && (
+        <div className="fixed top-20 right-4 z-50 bg-emerald-600 text-white px-4 py-2 rounded-lg shadow-lg flex items-center animate-fadeIn">
+          <CheckCircle className="w-5 h-5 mr-2" />
+          <span>設定與庫存已儲存！</span>
+        </div>
+      )}
+
       {/* API Key Modal */}
       {showApiKeyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
@@ -228,175 +314,196 @@ const App: React.FC = () => {
         </div>
         
         {/* Mobile Tabs */}
-        <div className="sm:hidden grid grid-cols-2 border-t border-slate-100">
-           <button
-              onClick={() => setActiveTab(TabView.MARKET_ANALYSIS)}
-              className={`${
-                activeTab === TabView.MARKET_ANALYSIS
-                  ? 'text-indigo-600 bg-indigo-50/50'
-                  : 'text-slate-500'
-              } py-3 text-sm font-medium text-center transition-colors`}
-            >
-              市場分析
-            </button>
-            <button
-              onClick={() => setActiveTab(TabView.RETIREMENT_PLANNING)}
-              className={`${
-                activeTab === TabView.RETIREMENT_PLANNING
-                  ? 'text-indigo-600 bg-indigo-50/50'
-                  : 'text-slate-500'
-              } py-3 text-sm font-medium text-center transition-colors`}
-            >
-              退休規劃
-            </button>
+        <div className="sm:hidden grid grid-cols-2 border-t border-slate-200">
+          <button
+            onClick={() => setActiveTab(TabView.MARKET_ANALYSIS)}
+            className={`${
+              activeTab === TabView.MARKET_ANALYSIS
+                ? 'bg-indigo-50 text-indigo-700 border-b-2 border-indigo-500'
+                : 'bg-white text-slate-500 border-b-2 border-transparent'
+            } py-3 text-sm font-medium text-center transition-colors`}
+          >
+            市場與持股分析
+          </button>
+          <button
+            onClick={() => setActiveTab(TabView.RETIREMENT_PLANNING)}
+            className={`${
+              activeTab === TabView.RETIREMENT_PLANNING
+                ? 'bg-indigo-50 text-indigo-700 border-b-2 border-indigo-500'
+                : 'bg-white text-slate-500 border-b-2 border-transparent'
+            } py-3 text-sm font-medium text-center transition-colors`}
+          >
+            退休金試算
+          </button>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {errorMsg && (
-          <div className="mb-6 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center animate-fadeIn">
-            <AlertTriangle className="w-5 h-5 mr-2 flex-shrink-0" />
-            <p className="text-sm">{errorMsg}</p>
+          <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start animate-fadeIn">
+            <AlertTriangle className="w-5 h-5 text-rose-500 mr-3 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-rose-700">{errorMsg}</div>
           </div>
         )}
 
-        {/* Tab Content */}
         {activeTab === TabView.MARKET_ANALYSIS && (
-          <div className="space-y-10 animate-fadeIn">
+          <div className="space-y-8 animate-fadeIn">
             
-            {/* Section 1: My Portfolio (Existing) */}
+            {/* 1. Market Trends Section */}
             <section className="space-y-4">
-              <div className="flex items-center space-x-2 mb-2">
-                 <div className="p-2 bg-indigo-100 rounded-lg">
-                    <PieIcon className="w-5 h-5 text-indigo-600" />
-                 </div>
-                 <h2 className="text-xl font-bold text-slate-800">現有持股 / 自選分析 (My Portfolio)</h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-slate-800 flex items-center">
+                  <Zap className="w-6 h-6 mr-2 text-yellow-500" /> 
+                  本日市場熱點
+                </h2>
+                <button 
+                  onClick={handleFetchTrends}
+                  disabled={trendLoading}
+                  className="text-sm text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50"
+                >
+                  {trendLoading ? '更新中...' : '刷新資訊'}
+                </button>
+              </div>
+              <StockTable 
+                stocks={trendStocks} 
+                loading={trendLoading} 
+              />
+            </section>
+
+            {/* 2. My Portfolio Section */}
+            <section className="space-y-4 pt-4 border-t border-slate-200">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-slate-800 flex items-center">
+                  <Briefcase className="w-6 h-6 mr-2 text-indigo-600" /> 
+                  我的持股分析
+                </h2>
+                {hasPendingSymbols && (
+                  <span className="text-xs px-2 py-1 bg-amber-100 text-amber-800 rounded-full font-medium animate-pulse">
+                    有未更新的代碼
+                  </span>
+                )}
               </div>
               
-              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm transition-shadow hover:shadow-md">
-                <div className="mb-6">
-                   <label className="block text-sm font-medium text-slate-700 mb-2">輸入目前持有的股票代碼 (Enter加入)</label>
-                   <div className="flex gap-2">
-                      <div className="relative flex-grow">
-                        <input
-                          type="text"
-                          value={inputSymbol}
-                          onChange={(e) => setInputSymbol(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && handleAddSymbol()}
-                          placeholder="例如: 2330, 0050, NVDA"
-                          className="shadow-sm focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:text-sm border-slate-300 rounded-md p-3 border"
-                        />
-                        <button 
-                          onClick={handleAddSymbol}
-                          className="absolute right-2 top-2 p-1 bg-slate-100 rounded hover:bg-slate-200 text-slate-600"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-                      </div>
-                      <button
-                        onClick={handleAnalyzePortfolio}
-                        disabled={mySymbols.length === 0 || portfolioLoading}
-                        className="inline-flex items-center px-6 py-3 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                <div className="flex flex-col md:flex-row gap-4 mb-6">
+                  <div className="flex-grow">
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      輸入股票代號 (逗號分隔)
+                    </label>
+                    <div className="flex gap-2">
+                       <input
+                        type="text"
+                        value={inputSymbol}
+                        onChange={(e) => setInputSymbol(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleAddSymbol()}
+                        placeholder="例如: 2330, 0050, 2834, 3042"
+                        className="flex-grow p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none uppercase"
+                      />
+                      <button 
+                        onClick={handleAddSymbol}
+                        disabled={!inputSymbol}
+                        className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 font-medium flex items-center disabled:opacity-50"
                       >
-                        {portfolioLoading ? '分析中...' : '開始分析'}
-                        <Search className="ml-2 w-4 h-4 hidden sm:inline" />
+                        <Plus className="w-4 h-4 mr-1" /> 加入
                       </button>
-                   </div>
-                   
-                   {/* Symbol Tags */}
-                   <div className="mt-4 flex flex-wrap gap-2 min-h-[2rem]">
-                      {mySymbols.length === 0 && (
-                        <span className="text-sm text-slate-400 italic">您的觀察清單是空的，請新增股票以開始分析...</span>
+                    </div>
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <button 
+                      onClick={handleManualSave}
+                      className="w-full md:w-auto px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 font-medium shadow-sm transition-colors flex items-center justify-center h-[42px]"
+                      title="強制儲存目前的設定"
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      儲存設定
+                    </button>
+                    
+                    <button 
+                      onClick={handleAnalyzePortfolio}
+                      disabled={portfolioLoading || mySymbols.length === 0}
+                      className={`w-full md:w-auto px-6 py-2 text-white rounded-lg font-medium shadow-sm transition-all flex items-center justify-center h-[42px] ${
+                        hasPendingSymbols 
+                          ? 'bg-amber-500 hover:bg-amber-600 ring-2 ring-amber-200' 
+                          : 'bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50'
+                      }`}
+                    >
+                      {portfolioLoading ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                          AI 分析中...
+                        </>
+                      ) : (
+                        <>
+                          <Search className="w-4 h-4 mr-2" />
+                          {hasPendingSymbols ? '更新所有報價' : '開始分析'}
+                        </>
                       )}
-                      {mySymbols.map(symbol => (
-                        <span key={symbol} className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 animate-fadeIn">
+                    </button>
+                  </div>
+                </div>
+
+                {mySymbols.length > 0 && (
+                  <div className="mb-6 flex flex-wrap gap-2 p-4 bg-slate-50 rounded-lg border border-slate-100">
+                    <div className="w-full text-xs text-slate-400 mb-2">已儲存的觀察名單 (點擊右上角「開始分析」取得報價)：</div>
+                    {mySymbols.map(symbol => {
+                       const isAnalyzed = portfolioStocks.some(s => s.symbol === symbol);
+                       return (
+                        <span key={symbol} className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${isAnalyzed ? 'bg-white text-slate-800 border-slate-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
                           {symbol}
-                          <button onClick={() => handleRemoveSymbol(symbol)} className="ml-1.5 text-indigo-400 hover:text-indigo-600">
+                          <button 
+                            onClick={() => handleRemoveSymbol(symbol)}
+                            className="ml-2 text-slate-400 hover:text-rose-500 focus:outline-none"
+                            title="移除"
+                          >
                             <X className="w-3 h-3" />
                           </button>
                         </span>
-                      ))}
-                   </div>
-                </div>
-
-                {/* Portfolio Results */}
-                {portfolioStocks.length > 0 && (
-                  <div className="mt-8 pt-8 border-t border-slate-100 animate-fadeIn">
-                     <StockTable 
-                       title="持股診斷報告"
-                       stocks={portfolioStocks} 
-                       loading={portfolioLoading} 
-                       showSummary={true}
-                       quantities={stockQuantities}
-                       onQuantityChange={handleQuantityChange}
-                     />
+                      );
+                    })}
                   </div>
+                )}
+                
+                {portfolioStocks.length === 0 && mySymbols.length > 0 && !portfolioLoading && (
+                  <div className="text-center py-10 bg-slate-50 rounded-lg border border-dashed border-slate-300">
+                     <div className="mx-auto w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm mb-3">
+                        <TrendingUp className="w-6 h-6 text-indigo-500" />
+                     </div>
+                     <h3 className="text-slate-900 font-medium">已讀取到您的觀察名單</h3>
+                     <p className="text-slate-500 text-sm mt-1 mb-4">點擊上方的「開始分析」或「更新所有報價」來獲取最新股價與 AI 建議。</p>
+                     <button 
+                       onClick={handleAnalyzePortfolio}
+                       className="text-sm text-indigo-600 font-medium hover:text-indigo-800 underline"
+                     >
+                       立即更新
+                     </button>
+                  </div>
+                )}
+
+                {(portfolioStocks.length > 0 || portfolioLoading) && (
+                  <StockTable 
+                    stocks={portfolioStocks} 
+                    loading={portfolioLoading}
+                    showSummary={false}
+                    quantities={stockQuantities}
+                    onQuantityChange={handleQuantityChange}
+                  />
                 )}
               </div>
             </section>
-
-            {/* Section 2: Market Trends (Market-Type) */}
-            <section className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center space-x-2">
-                   <div className="p-2 bg-amber-100 rounded-lg">
-                      <TrendingUp className="w-5 h-5 text-amber-600" />
-                   </div>
-                   <h2 className="text-xl font-bold text-slate-800">市場趨勢選股 (Market Trends)</h2>
-                </div>
-                <button 
-                   onClick={handleFetchTrends}
-                   disabled={trendLoading}
-                   className="flex items-center px-4 py-2 text-sm font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg border border-amber-200 transition-colors"
-                >
-                   <Zap className="w-4 h-4 mr-2" />
-                   {trendLoading ? 'AI 掃描中...' : '重新掃描熱點'}
-                </button>
-              </div>
-
-              <div className="bg-slate-50 p-1 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                 <StockTable 
-                    title="今日熱門話題股"
-                    stocks={trendStocks} 
-                    loading={trendLoading} 
-                    showSummary={true} 
-                  />
-              </div>
-            </section>
-
           </div>
         )}
 
         {activeTab === TabView.RETIREMENT_PLANNING && (
-          <div className="space-y-6 animate-fadeIn">
-             <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm mb-6">
-                <div className="flex items-center">
-                   <div className="bg-amber-100 p-2 rounded-lg mr-4">
-                      <Briefcase className="w-6 h-6 text-amber-600" />
-                   </div>
-                   <div>
-                      <h2 className="text-lg font-bold text-slate-800">退休目標規劃師</h2>
-                      <p className="text-sm text-slate-500">計算您的財務自由數字，並獲得優化建議</p>
-                   </div>
-                </div>
-             </div>
-             <RetirementCalc 
-               portfolioStocks={portfolioStocks} 
-               stockQuantities={stockQuantities}
-               onQuantityChange={handleQuantityChange}
-             />
+          <div className="animate-fadeIn">
+            <RetirementCalc 
+              portfolioStocks={portfolioStocks}
+              stockQuantities={stockQuantities}
+              onQuantityChange={handleQuantityChange}
+            />
           </div>
         )}
       </main>
-      
-      <footer className="bg-white border-t border-slate-200 mt-12 py-8">
-        <div className="max-w-7xl mx-auto px-4 text-center text-slate-400 text-xs">
-          <p>© 2024 理財小教室 Finance Workshop. Data generated by AI for simulation purposes.</p>
-          <p className="mt-1">投資一定有風險，基金投資有賺有賠。本工具僅供參考，不代表投資建議。</p>
-        </div>
-      </footer>
     </div>
   );
 };

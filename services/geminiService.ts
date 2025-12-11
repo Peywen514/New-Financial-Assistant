@@ -8,7 +8,6 @@ const getApiKey = (): string | null => {
   if (stored) return stored;
   
   // 2. Check Environment Variables
-  // Using try-catch to safely handle process or import.meta access
   try {
     // @ts-ignore
     if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
@@ -16,7 +15,7 @@ const getApiKey = (): string | null => {
       return import.meta.env.VITE_API_KEY;
     }
   } catch (e) {
-    // Ignore error if import.meta is not available
+    // Ignore error
   }
 
   try {
@@ -69,6 +68,32 @@ const PRE_DEFINED_MAPPINGS: Record<string, string> = {
   "9904": "9904 寶成"
 };
 
+const getTaipeiTimeInstruction = () => {
+  const now = new Date();
+  const options: Intl.DateTimeFormatOptions = { 
+    timeZone: 'Asia/Taipei', 
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  };
+  const timeString = now.toLocaleString('zh-TW', options);
+  
+  return `
+    現在台北時間是：${timeString}。
+    
+    **股價時間判定規則 (極重要)：**
+    台股交易時間為 09:00 - 13:30。
+    1. 若現在時間 **已超過 13:30**：請提供 **「今日收盤價」**。
+    2. 若現在時間 **早於 09:00**：請提供 **「前一交易日收盤價」**。
+    3. 若現在為 **09:00 - 13:30 之間**：請提供 **「即時成交價」**。
+    
+    請務必檢查 Google Search 結果的時間戳記，確保符合上述規則。
+  `;
+};
+
 export const analyzePortfolio = async (symbols: string[]): Promise<StockAnalysis[]> => {
   const model = "gemini-2.5-flash";
   if (!symbols || symbols.length === 0) return [];
@@ -87,8 +112,12 @@ export const analyzePortfolio = async (symbols: string[]): Promise<StockAnalysis
 
   try {
     const ai = getAIClient();
+    const timeInstruction = getTaipeiTimeInstruction();
+    
     const prompt = `
-      你是一個專業的金融分析系統。請使用 Google Search 查詢以下股票的「正確繁體中文公司名稱」與「最新即時股價」：${querySymbols}。
+      你是一個專業的金融分析系統。請使用 Google Search 查詢以下股票的「正確繁體中文公司名稱」與「最新股價」：${querySymbols}。
+      
+      ${timeInstruction}
       
       **極重要 - 代碼校正指令：**
       請嚴格遵守以下代碼對應，不可混淆：
@@ -99,7 +128,7 @@ export const analyzePortfolio = async (symbols: string[]): Promise<StockAnalysis
       
       **一般指令：**
       1. 務必使用 Google Search 獲取真實數據，不要使用估算值。
-      2. 「currentPrice」必須是查詢到的最新價格。
+      2. 「currentPrice」必須嚴格遵守上述的時間規則。
       3. 請針對持有狀況給出建議 (BUY/SELL/HOLD)。
       
       請回傳一個純 JSON 陣列 (Array)，不要包含其他解釋文字，格式如下：
@@ -110,7 +139,7 @@ export const analyzePortfolio = async (symbols: string[]): Promise<StockAnalysis
           "marketCap": "市值 (e.g. 3000億)",
           "high52Week": 數字 (52週最高),
           "low52Week": 數字 (52週最低),
-          "currentPrice": 數字 (最新查到的精確價格),
+          "currentPrice": 數字 (依據時間規則的精確價格),
           "suggestBuyPrice": 數字 (建議買入價),
           "suggestSellPrice": 數字 (建議賣出價),
           "recommendation": "BUY" | "SELL" | "HOLD",
@@ -142,12 +171,16 @@ export const analyzeMarketTrends = async (): Promise<StockAnalysis[]> => {
   
   try {
     const ai = getAIClient();
+    const timeInstruction = getTaipeiTimeInstruction();
+
     const prompt = `
       請使用 Google Search 掃描「今日」或「近3天」台灣股市 (TWSE/TPEX) 的熱門新聞、成交量排行或法人買賣超資訊。
       找出 3 檔目前討論度最高或趨勢最明顯的股票。
       
+      ${timeInstruction}
+      
       **重要指令：**
-      1. 使用搜尋工具確保價格 (currentPrice) 是最新的收盤價。
+      1. 使用搜尋工具確保價格 (currentPrice) 符合時間規則 (收盤價/即時價)。
       2. analysis 欄位需說明是因為哪則新聞或事件而熱門。
       3. 確保公司名稱準確 (例如: 2834 是 臺企銀)。
       
